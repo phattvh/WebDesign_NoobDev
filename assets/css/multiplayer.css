@@ -1113,3 +1113,55 @@ body {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* User Rank Widget */
+.user-rank-widget {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  padding: 14px;
+  margin-bottom: 16px;
+  backdrop-filter: blur(10px);
+}
+
+.user-rank-widget .rank-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.user-rank-widget .rank-title {
+  font-weight: 600;
+  color: #fff;
+  font-size: 0.95rem;
+}
+
+.user-rank-widget .rank-title i {
+  color: #facc15;
+  margin-right: 6px;
+}
+
+.user-rank-widget .elo-value {
+  font-weight: 700;
+  color: #facc15;
+  font-size: 0.95rem;
+}
+
+.user-rank-widget .rank-badge-display {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.ranked-result-badge {
+  text-align: center;
+  background: rgba(250, 204, 21, 0.08);
+  border: 1px solid rgba(250, 204, 21, 0.25);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin: 12px auto;
+  max-width: 320px;
+}
+

@@ -355,6 +355,19 @@ function renderLobby() {
       </div>
 
       <aside class="dashboard-sidebar">
+        <div class="user-rank-widget">
+          <div class="rank-header">
+            <span class="rank-title"><i class="fas fa-trophy"></i> Ranked ELO</span>
+            <span id="myEloValue" class="elo-value">${state.myElo || 1000} ELO</span>
+          </div>
+          <div id="myRankBadge" class="rank-badge-display">
+            ${getRankBadgeHTML(state.myElo || 1000)}
+          </div>
+          <div class="rank-chart-wrapper" style="height: 90px; margin-top: 8px;">
+            <canvas id="mobaRankChart"></canvas>
+          </div>
+        </div>
+
         <div class="friends-widget">
           <div class="sidebar-header">
             <h3><i class="fas fa-user-friends"></i> Friends</h3>
@@ -502,6 +515,12 @@ async function leaveCurrentRoom() {
     }
   }
 
+  if (syncThrottleTimer) {
+    clearTimeout(syncThrottleTimer);
+    syncThrottleTimer = null;
+  }
+  pendingSyncPayload = null;
+
   resetRoomSubscriptions();
 
   state.mpRoomId = null;
@@ -644,9 +663,8 @@ async function joinRoom(roomId) {
     return;
   }
 
-  if (state.mpRoomId && state.mpRoomId !== roomId) {
-    await leaveCurrentRoom();
-  }
+  const previousRoomId =
+    state.mpRoomId && state.mpRoomId !== roomId ? state.mpRoomId : null;
 
   const t = translations[state.lang] || translations.en;
   updateLobbyStatusLabel("Joining room...");
@@ -726,6 +744,15 @@ async function joinRoom(roomId) {
         updateLobbyStatusLabel("Join failed");
       }
       return;
+    }
+
+    if (previousRoomId) {
+      try {
+        await remove(ref(rtdb, `rooms/${previousRoomId}/players/${user.uid}`));
+        await remove(ref(rtdb, `rooms/${previousRoomId}/typing/${user.uid}`));
+      } catch (err) {
+        console.warn("Cleanup previous room failed:", err);
+      }
     }
 
     resetRoomSubscriptions();
@@ -1542,18 +1569,130 @@ function finalizeRoomResults() {
   if (els.finalTime)
     els.finalTime.innerText = formatTime(state.maxTime - state.timeLeft);
 
-  renderFinalLeaderboard();
+  const sorted = getSortedPlayers();
+  renderFinalLeaderboard(sorted);
 
   if (!state.scoreSaved) {
+    const user = auth.currentUser;
     saveGameScore(
       "multiplayer",
       state.latestStats.wpm || 0,
       state.latestStats.accuracy || 100,
     );
+
+    if (user && state.roomMode === "ranked") {
+      applyRankedMatchResults(user, sorted);
+    }
+
     state.scoreSaved = true;
   }
 
   if (els.resultOverlay) els.resultOverlay.classList.add("active");
+}
+
+function calculateEloChanges(sortedPlayers, currentUid) {
+  const N = sortedPlayers.length;
+  if (N < 2) return 0;
+
+  const myIndex = sortedPlayers.findIndex((p) => p.uid === currentUid);
+  if (myIndex === -1) return 0;
+
+  const myPlayer = sortedPlayers[myIndex];
+  const Ra = myPlayer.elo || 1000;
+  const K = 32;
+
+  let totalScoreDiff = 0;
+
+  sortedPlayers.forEach((opp, oppIndex) => {
+    if (opp.uid === currentUid) return;
+    const Rb = opp.elo || 1000;
+    const Ea = 1 / (1 + Math.pow(10, (Rb - Ra) / 400));
+    let Sa = 0.5;
+    if (myIndex < oppIndex) Sa = 1;
+    else if (myIndex > oppIndex) Sa = 0;
+
+    totalScoreDiff += Sa - Ea;
+  });
+
+  return Math.round((K / (N - 1)) * totalScoreDiff);
+}
+
+function renderEloResultBadge(deltaElo, newElo, myRank) {
+  const header = document.querySelector(".result-card h2");
+  if (!header) return;
+
+  const existing = document.getElementById("rankedResultBadge");
+  if (existing) existing.remove();
+
+  const badge = document.createElement("div");
+  badge.id = "rankedResultBadge";
+  badge.className = "ranked-result-badge";
+  const sign = deltaElo >= 0 ? `+${deltaElo}` : `${deltaElo}`;
+  const color = deltaElo >= 0 ? "#4ade80" : "#f87171";
+
+  badge.innerHTML = `
+    <div style="font-size: 0.9rem; color: #94a3b8;">Ranked Placement: <strong style="color: #f8fafc;">#${myRank}</strong></div>
+    <div style="font-size: 1.25rem; font-weight: 700; color: ${color}; margin-top: 4px;">
+      ${sign} ELO <span style="color: #cbd5e1; font-weight: normal; font-size: 0.95rem;">(${newElo} ELO)</span>
+    </div>
+  `;
+  header.after(badge);
+}
+
+function updateRankUI() {
+  const eloVal = document.getElementById("myEloValue");
+  const rankBadge = document.getElementById("myRankBadge");
+  if (eloVal) eloVal.innerText = `${state.myElo || 1000} ELO`;
+  if (rankBadge) rankBadge.innerHTML = getRankBadgeHTML(state.myElo || 1000);
+}
+
+async function applyRankedMatchResults(user, sorted) {
+  const myIndex = sorted.findIndex((p) => p.uid === user.uid);
+  const myRank = myIndex !== -1 ? myIndex + 1 : sorted.length;
+  const deltaElo = calculateEloChanges(sorted, user.uid);
+  const oldElo = state.myElo || 1000;
+  const newElo = Math.max(100, oldElo + deltaElo);
+
+  state.myElo = newElo;
+  if (!state.myEloHistory) state.myEloHistory = [oldElo];
+  state.myEloHistory.push(newElo);
+
+  renderEloResultBadge(deltaElo, newElo, myRank);
+  updateRankUI();
+  renderMobaRankChart(state.myEloHistory);
+
+  try {
+    const userRef = doc(db, "users", user.uid);
+    await updateDoc(userRef, {
+      elo: newElo,
+      eloHistory: arrayUnion(newElo),
+    });
+
+    await addDoc(collection(db, "matches_history"), {
+      uid: user.uid,
+      roomId: state.mpRoomId,
+      mode: state.roomMode,
+      duration: state.matchDuration,
+      placement: myRank,
+      totalPlayers: sorted.length,
+      wpm: state.latestStats.wpm || 0,
+      accuracy: state.latestStats.accuracy || 100,
+      eloBefore: oldElo,
+      eloAfter: newElo,
+      eloDelta: deltaElo,
+      opponents: sorted
+        .filter((p) => p.uid !== user.uid)
+        .map((p) => ({
+          uid: p.uid,
+          name: p.name || "Guest",
+          wpm: p.wpm || 0,
+          elo: p.elo || 1000,
+        })),
+      createdAt: serverTimestamp(),
+    });
+  } catch (err) {
+    console.error("Failed to persist ranked match result:", err);
+  }
 }
 
 function renderFinalLeaderboard() {
@@ -2223,20 +2362,29 @@ async function loadUserProfile() {
         wpm_best: 0,
         matches_played: 0,
         elo: 1000,
+        eloHistory: [1000],
         friends: [],
       },
       { merge: true },
     );
-    data = { shortId: newShortId, friends: [], elo: 1000 };
+    data = { shortId: newShortId, friends: [], elo: 1000, eloHistory: [1000] };
   } else {
     data = userSnap.data();
     if (data.elo === undefined) {
       data.elo = 1000;
-      await updateDoc(userRef, { elo: 1000 });
+      await updateDoc(userRef, { elo: 1000, eloHistory: [1000] });
     }
   }
 
-  state.myElo = data.elo;
+  state.myElo = data.elo != null ? data.elo : 1000;
+  state.myEloHistory =
+    Array.isArray(data.eloHistory) && data.eloHistory.length > 0
+      ? data.eloHistory
+      : [state.myElo];
+
+  updateRankUI();
+  renderMobaRankChart(state.myEloHistory);
+
   const idDisplay = document.getElementById("myShortId");
   if (idDisplay) {
     if (!data.shortId) {
@@ -2544,48 +2692,47 @@ async function sendFriendMessage() {
 }
 
 /* --- VẼ BIỂU ĐỒ MOBA RANK --- */
-function renderMobaRankChart() {
+let rankChartInstance = null;
+
+function renderMobaRankChart(eloHistory = state.myEloHistory) {
   const canvas = document.getElementById("mobaRankChart");
   if (!canvas || typeof Chart === "undefined") return;
 
   const ctx = canvas.getContext("2d");
+  const data =
+    Array.isArray(eloHistory) && eloHistory.length > 0
+      ? eloHistory.slice(-10)
+      : [state.myElo || 1000];
 
-  // Dữ liệu ELO giả lập (Bạn sẽ lấy mảng này từ Firebase user.eloHistory sau)
-  const eloData = [1000, 1050, 1030, 1120, 1150, 1110, 1250, 1300];
-  const labels = [
-    "Match 1",
-    "Match 2",
-    "Match 3",
-    "Match 4",
-    "Match 5",
-    "Match 6",
-    "Match 7",
-    "Match 8",
-  ];
+  const labels = data.map((_, index) => `#${index + 1}`);
 
-  // Tạo Gradient nền màu vàng chuẩn Rank Gold/Ranked
-  const gradient = ctx.createLinearGradient(0, 0, 0, 200);
-  gradient.addColorStop(0, "rgba(250, 204, 21, 0.4)"); // Vàng chói ở trên
-  gradient.addColorStop(1, "rgba(250, 204, 21, 0.0)"); // Mờ dần ở dưới cùng
+  if (rankChartInstance) {
+    rankChartInstance.destroy();
+    rankChartInstance = null;
+  }
 
-  new Chart(ctx, {
+  const gradient = ctx.createLinearGradient(0, 0, 0, 90);
+  gradient.addColorStop(0, "rgba(250, 204, 21, 0.45)");
+  gradient.addColorStop(1, "rgba(250, 204, 21, 0.0)");
+
+  rankChartInstance = new Chart(ctx, {
     type: "line",
     data: {
       labels: labels,
       datasets: [
         {
           label: "ELO Rating",
-          data: eloData,
-          borderColor: "#facc15", // Màu dây viền (var(--accent-ranked))
+          data: data,
+          borderColor: "#facc15",
           backgroundColor: gradient,
-          borderWidth: 3,
+          borderWidth: 2,
           pointBackgroundColor: "#0f172a",
           pointBorderColor: "#facc15",
-          pointBorderWidth: 2,
-          pointRadius: 4,
-          pointHoverRadius: 6,
+          pointBorderWidth: 1.5,
+          pointRadius: 3,
+          pointHoverRadius: 5,
           fill: true,
-          tension: 0.4, // Tham số này tạo đường cong mềm mại (Moba Style)
+          tension: 0.35,
         },
       ],
     },
@@ -2598,13 +2745,16 @@ function renderMobaRankChart() {
           mode: "index",
           intersect: false,
           backgroundColor: "rgba(15, 23, 42, 0.9)",
+          callbacks: {
+            label: (context) => `ELO: ${context.parsed.y}`,
+          },
         },
       },
       scales: {
-        x: { display: false }, // Ẩn tên trận dưới trục X cho gọn
+        x: { display: false },
         y: {
           grid: { color: "rgba(255,255,255,0.05)" },
-          ticks: { color: "#94a3b8" },
+          ticks: { color: "#94a3b8", font: { size: 10 } },
         },
       },
     },
