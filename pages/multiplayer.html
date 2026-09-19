@@ -23,43 +23,65 @@
     <nav></nav>
 
     <div class="multiplayer-wrapper">
+      <!-- LOBBY SECTION (Dynamic template from renderLobby()) -->
       <div id="lobbySection" class="lobby-container section-transition">
-        <div class="loading">Loading Arena...</div>
+        <div class="loading">
+          <div class="arena-spinner"></div>
+          <span>Entering Multiplayer Arena...</span>
+        </div>
       </div>
 
+      <!-- IN-GAME MATCH ARENA SECTION -->
       <section
         id="gameSection"
         class="game-section section-transition"
         style="display: none"
       >
         <div class="game-shell">
-          <!-- Race Track at the Top -->
-          <div class="race-track-panel">
-            <div id="raceTrack" class="race-track-list"></div>
-          </div>
-
+          <!-- TOP HUD: MATCH STATUS, CRITICAL STATS & CONTROLS -->
           <header class="game-topbar">
+            <!-- Left Info Block -->
             <div class="game-title-block">
               <div class="match-meta" id="matchMeta"></div>
             </div>
 
+            <!-- Center Competitive HUD: Prominent TIME, WPM, ACC -->
             <div class="stats-bar">
-              <div class="stat-group">
-                <div class="stat-value" id="wpm">0</div>
-                <div class="stat-label" data-translate="statWPM">WPM</div>
+              <div class="stat-group stat-time-highlight">
+                <div class="stat-icon"><i class="fas fa-stopwatch"></i></div>
+                <div class="stat-data">
+                  <div class="stat-value" id="timeLeft">0:00</div>
+                  <div class="stat-label" data-translate="statTime">TIME LEFT</div>
+                </div>
               </div>
-              <div class="stat-group">
-                <div class="stat-value" id="accuracy">100%</div>
-                <div class="stat-label" data-translate="statAcc">ACC</div>
+
+              <div class="stat-divider"></div>
+
+              <div class="stat-group stat-wpm-highlight">
+                <div class="stat-icon"><i class="fas fa-tachometer-alt"></i></div>
+                <div class="stat-data">
+                  <div class="stat-value" id="wpm">0</div>
+                  <div class="stat-label" data-translate="statWPM">SPEED (WPM)</div>
+                </div>
               </div>
-              <div class="stat-group">
-                <div class="stat-value" id="timeLeft">0:00</div>
-                <div class="stat-label" data-translate="statTime">TIME</div>
+
+              <div class="stat-divider"></div>
+
+              <div class="stat-group stat-acc-highlight">
+                <div class="stat-icon"><i class="fas fa-bullseye"></i></div>
+                <div class="stat-data">
+                  <div class="stat-value" id="accuracy">100%</div>
+                  <div class="stat-label" data-translate="statAcc">ACCURACY</div>
+                </div>
               </div>
             </div>
 
+            <!-- Right Controls Block -->
             <div class="nav-controls">
-              <span class="live-badge" id="gameStatusBadge">Racing</span>
+              <span class="live-badge" id="gameStatusBadge">
+                <span class="live-indicator-dot"></span>
+                Racing
+              </span>
               <button
                 class="nav-control-btn icon"
                 id="btnSound"
@@ -68,15 +90,27 @@
                 <i class="fas fa-volume-up"></i>
               </button>
               <button
-                class="nav-control-btn icon"
-                onclick="location.reload()"
+                class="nav-control-btn icon btn-leave-match"
                 title="Leave Match"
               >
                 <i class="fas fa-sign-out-alt"></i>
+                <span class="btn-text-leave">Leave</span>
               </button>
             </div>
           </header>
 
+          <!-- ESPORTS RACE TRACK -->
+          <div class="race-track-panel">
+            <div class="race-track-header">
+              <div class="rth-title">
+                <i class="fas fa-flag-checkered"></i> LIVE RACE TRACK
+              </div>
+              <div class="rth-indicator">REALTIME POSITION</div>
+            </div>
+            <div id="raceTrack" class="race-track-list"></div>
+          </div>
+
+          <!-- MAIN TYPING ARENA -->
           <div class="game-main-area">
             <div class="typing-box-wrapper" id="typingWrapper">
               <input
@@ -84,69 +118,97 @@
                 id="inputField"
                 class="input-field"
                 autocomplete="off"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
               />
               <div class="typing-box" id="quoteDisplay"></div>
               <div class="focus-overlay" id="focusOverlay">
                 <div class="start-msg">
-                  <i class="fas fa-keyboard"></i>
-                  <span>Click here or press any key to focus</span>
+                  <div class="start-msg-icon"><i class="fas fa-keyboard"></i></div>
+                  <div class="start-msg-text">Click or press any key to focus typing arena</div>
+                  <div class="start-msg-hint">Keystrokes will sync automatically</div>
                 </div>
               </div>
             </div>
           </div>
 
+          <!-- LOWER DECK: COMPACT MECHANICAL KEYBOARD & REALTIME PERFORMANCE CHART -->
           <div class="game-footer-area">
-            <div class="keyboard-container"></div>
+            <!-- Mechanical Keyboard Section -->
+            <div class="arena-keyboard-card">
+              <div class="deck-header">
+                <span><i class="fas fa-keyboard"></i> MECHANICAL KEYGUIDE</span>
+              </div>
+              <div class="keyboard-container"></div>
+            </div>
 
+            <!-- Realtime WPM Performance Chart -->
             <div class="mp-chart-container">
               <div class="panel-heading">
-                <div>
-                  <h3>Live WPM Race</h3>
+                <div class="deck-header">
+                  <span><i class="fas fa-chart-line"></i> LIVE WPM RACE PACE</span>
                 </div>
               </div>
-              <canvas id="mpChart"></canvas>
+              <div class="chart-canvas-wrapper">
+                <canvas id="mpChart"></canvas>
+              </div>
             </div>
           </div>
 
-          <!-- Hidden Elements for JS logic -->
+          <!-- Hidden elements for JS logic -->
           <div id="readySummary" style="display: none"></div>
           <div id="miniRoomEvents" style="display: none"></div>
         </div>
 
+        <!-- COUNTDOWN OVERLAY -->
         <div class="countdown-overlay" id="countdownOverlay">
           <div class="countdown-card">
+            <div class="countdown-eyebrow">PREPARE TO RACE</div>
             <div class="countdown-number" id="countdownNumber">3</div>
+            <div class="countdown-hint">Type as fast and accurately as possible</div>
           </div>
         </div>
       </section>
     </div>
 
+    <!-- MATCH COMPLETE / RESULT OVERLAY -->
     <div class="result-overlay section-transition" id="resultOverlay">
       <div class="result-card">
-        <h2 data-translate="gameOver">Match Finished</h2>
+        <div class="result-card-header">
+          <div class="result-trophy-glow"><i class="fas fa-trophy"></i></div>
+          <h2 data-translate="gameOver">Match Finished</h2>
+          <p class="result-subtitle">Official race performance recorded</p>
+        </div>
 
         <div class="result-stats">
-          <div class="res-item">
+          <div class="res-item stat-card-wpm">
+            <div class="res-item-label" data-translate="statWPM">SPEED</div>
             <div class="big-num" id="finalWpm">0</div>
-            <span data-translate="statWPM">WPM</span>
+            <div class="res-item-unit">WPM</div>
           </div>
-          <div class="res-item">
+          <div class="res-item stat-card-acc">
+            <div class="res-item-label" data-translate="statAcc">ACCURACY</div>
             <div class="big-num" id="finalAcc">0%</div>
-            <span data-translate="statAcc">Accuracy</span>
+            <div class="res-item-unit">PRECISION</div>
           </div>
-          <div class="res-item">
+          <div class="res-item stat-card-time">
+            <div class="res-item-label" data-translate="statTime">ELAPSED TIME</div>
             <div class="big-num" id="finalTime">0:00</div>
-            <span data-translate="statTime">Time</span>
+            <div class="res-item-unit">DURATION</div>
           </div>
         </div>
 
-        <div class="result-leaderboard">
+        <div class="result-leaderboard-section">
+          <div class="result-section-label">
+            <i class="fas fa-list-ol"></i> FINAL STANDINGS
+          </div>
           <div id="finalLeaderboard" class="final-leaderboard"></div>
         </div>
 
         <div class="result-actions">
-          <button class="cta-button" onclick="location.reload()">
-            Back to Lobby
+          <button class="cta-button btn-lobby-return" onclick="location.reload()">
+            <i class="fas fa-home"></i> Back to Lobby
           </button>
           <button class="btn-secondary" id="btnCopyRoomCodeResult">
             <i class="fas fa-copy"></i> Copy Link

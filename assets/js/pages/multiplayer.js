@@ -283,72 +283,157 @@ function renderLobby() {
   els.lobby.innerHTML = `
     <div class="dashboard-layout">
       <div class="dashboard-main">
+        <!-- ARENA HEADER BANNER -->
+        <div class="arena-hero-banner">
+          <div class="arena-hero-badge">
+            <span class="pulse-dot"></span>
+            <span>MULTIPLAYER ARENA // SEASON 2026</span>
+          </div>
+          <h1 class="arena-title">LIVE COMPETITIVE <span>TYPING</span></h1>
+          <p class="arena-subtitle">Test your speed against racers worldwide in real time. Climb the ELO ladder or scrim with rivals.</p>
+        </div>
+
+        <!-- PLAY MODES HERO CARDS -->
         <div class="play-options">
-          <div class="play-card" id="btnQuickMatch">
-            <i class="fas fa-bolt"></i>
-            <h3>${t.btnQuickMatch || "Quick Match"}</h3>
-            <p>Join a random public room</p>
+          <div class="play-card mode-quick" id="btnQuickMatch" role="button" tabindex="0">
+            <div class="play-card-glow"></div>
+            <div class="play-card-head">
+              <span class="mode-tag quick"><i class="fas fa-bolt"></i> CASUAL / SCRIM</span>
+              <span class="mode-status live"><i class="fas fa-circle"></i> INSTANT</span>
+            </div>
+            <div class="play-card-core">
+              <div class="play-card-icon quick">
+                <i class="fas fa-bolt"></i>
+              </div>
+              <div class="play-card-details">
+                <h3>${t.btnQuickMatch || "Quick Match"}</h3>
+                <p>Instant drop-in matchmaking. Battle 2-5 racers in standard open queue.</p>
+              </div>
+            </div>
+            <div class="play-card-footer">
+              <span class="queue-info"><i class="fas fa-users"></i> 2-5 Racers</span>
+              <span class="play-action-btn">QUEUE NOW <i class="fas fa-arrow-right"></i></span>
+            </div>
           </div>
-          <div class="play-card ranked" id="btnRanked">
-            <i class="fas fa-trophy"></i>
-            <h3>${t.btnRanked || "Ranked"}</h3>
-            <p>Compete for rating</p>
+
+          <div class="play-card mode-ranked ranked" id="btnRanked" role="button" tabindex="0">
+            <div class="play-card-glow ranked"></div>
+            <div class="play-card-head">
+              <span class="mode-tag ranked"><i class="fas fa-trophy"></i> COMPETITIVE 1V1</span>
+              <span class="mode-status rated"><i class="fas fa-medal"></i> MMR RATED</span>
+            </div>
+            <div class="play-card-core">
+              <div class="play-card-icon ranked">
+                <i class="fas fa-trophy"></i>
+              </div>
+              <div class="play-card-details">
+                <h3>${t.btnRanked || "Ranked 1v1"}</h3>
+                <p>High-stakes duel. Gain or lose official ELO rating on the global leaderboard.</p>
+              </div>
+            </div>
+            <div class="play-card-footer">
+              <span class="queue-info"><i class="fas fa-shield-alt"></i> Official MMR</span>
+              <span class="play-action-btn ranked">RANKED MATCH <i class="fas fa-arrow-right"></i></span>
+            </div>
           </div>
         </div>
 
+        <!-- CUSTOM SCRIM & PRIVATE ROOM SECTION -->
         <div class="custom-room-section">
-          <div class="room-actions-bar">
-            <div class="room-settings">
-              <select id="matchDurationSelect" class="sleek-input" style="width: auto; display: inline-block;">
-                <option value="30">30s</option>
-                <option value="60" selected>60s</option>
-                <option value="120">120s</option>
-              </select>
-              <select id="maxPlayersSelect" class="sleek-input" style="width: auto; display: inline-block; margin-left: 8px;">
-                <option value="2">2 Players (1v1)</option>
-                <option value="3">3 Players</option>
-                <option value="4">4 Players</option>
-                <option value="5" selected>5 Players</option>
-              </select>
+          <div class="custom-room-header">
+            <div class="crh-title">
+              <i class="fas fa-sliders-h"></i>
+              <span>CUSTOM SCRIM ROOMS</span>
             </div>
-            <button class="sleek-btn" id="btnCreateRoom">Create Room</button>
-            <div class="join-box">
-              <input type="text" id="roomInput" class="sleek-input" placeholder="Room ID">
-              <button class="sleek-btn outline" id="btnJoinRoom">Join</button>
+            <div class="crh-subtitle">Host or join a custom match with friends</div>
+          </div>
+
+          <div class="room-actions-bar">
+            <div class="room-settings-cluster">
+              <div class="setting-field">
+                <label for="matchDurationSelect"><i class="fas fa-stopwatch"></i> DURATION</label>
+                <select id="matchDurationSelect" class="sleek-input select-styled">
+                  <option value="30">30s Blitz</option>
+                  <option value="60" selected>60s Standard</option>
+                  <option value="120">120s Endurance</option>
+                </select>
+              </div>
+              <div class="setting-field">
+                <label for="maxPlayersSelect"><i class="fas fa-user-friends"></i> MAX RACERS</label>
+                <select id="maxPlayersSelect" class="sleek-input select-styled">
+                  <option value="2">2 Players (1v1)</option>
+                  <option value="3">3 Players</option>
+                  <option value="4">4 Players</option>
+                  <option value="5" selected>5 Players</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="room-controls-cluster">
+              <button class="sleek-btn primary-btn" id="btnCreateRoom">
+                <i class="fas fa-plus-circle"></i> Create Room
+              </button>
+              <div class="room-cluster-divider"></div>
+              <div class="join-box">
+                <div class="join-input-wrap">
+                  <i class="fas fa-key join-icon"></i>
+                  <input type="text" id="roomInput" class="sleek-input" placeholder="Room ID..." />
+                </div>
+                <button class="sleek-btn outline" id="btnJoinRoom">
+                  <i class="fas fa-sign-in-alt"></i> Join
+                </button>
+              </div>
             </div>
           </div>
         </div>
 
+        <!-- ACTIVE ROOM IN-LOBBY CONTAINER -->
         <div id="mpRoomInfo" class="room-info-container" style="display:none;">
           <div class="room-header-sleek">
             <div class="room-title">
-              <h2>Room <span id="roomIdDisplay" class="highlight"></span></h2>
-              <div id="roomModeBadge" class="badge"></div>
+              <div class="room-eyebrow">ACTIVE MATCHROOM</div>
+              <div class="room-title-row">
+                <h2>ROOM <span id="roomIdDisplay" class="highlight"></span></h2>
+                <div id="roomModeBadge" class="badge"></div>
+              </div>
             </div>
             <div class="room-header-actions">
               <span id="lobbyStatusValue" class="status-text">Waiting</span>
-              <button class="sleek-btn outline small" id="btnInvite"><i class="fas fa-link"></i> Invite</button>
+              <button class="sleek-btn outline small" id="btnInvite">
+                <i class="fas fa-link"></i> Invite Link
+              </button>
             </div>
           </div>
           
+          <div class="room-roster-header">
+            <span class="roster-title"><i class="fas fa-users"></i> LOBBY ROSTER</span>
+            <span class="roster-ready-metric"><span id="roomReadyCount">0/${state.roomMaxPlayers}</span> Ready</span>
+          </div>
+
           <div class="room-players-grid" id="playerList"></div>
           
           <div class="room-footer-sleek">
             <div class="room-summary">
-              <span id="roomReadyCount">0/${state.roomMaxPlayers}</span> Ready
+              <p id="waitingMsg" class="waiting-msg">${t.lblWaiting || "Waiting for racers to get ready..."}</p>
             </div>
             <div class="room-controls">
-              <p id="waitingMsg" class="waiting-msg">${t.lblWaiting || "Waiting..."}</p>
-              <button class="sleek-btn primary" id="btnReady">${t.btnReady || "Ready"}</button>
-              <button class="sleek-btn success" id="btnStartMatch" style="display:none;">${t.btnStartMatch || "Start Match"}</button>
+              <button class="sleek-btn ready-btn" id="btnReady">${t.btnReady || "Ready"}</button>
+              <button class="sleek-btn success start-btn" id="btnStartMatch" style="display:none;">
+                <i class="fas fa-play"></i> ${t.btnStartMatch || "Start Match"}
+              </button>
             </div>
           </div>
 
+          <!-- TACTICAL IN-ROOM CHAT -->
           <div class="sleek-chat">
+            <div class="chat-header-bar">
+              <i class="fas fa-comments"></i>
+              <span>ROOM CHAT</span>
+            </div>
             <div class="chat-messages" id="chatMessages"></div>
             <div class="chat-input-wrapper">
-              <input type="text" id="chatInput" placeholder="${t.placeholderChat || "Message..."}" class="sleek-input" />
-              <button id="btnSendChat" class="icon-btn"><i class="fas fa-paper-plane"></i></button>
+              <input type="text" id="chatInput" placeholder="${t.placeholderChat || "Message room..."}" class="sleek-input" />
+              <button id="btnSendChat" class="icon-btn" title="Send message"><i class="fas fa-paper-plane"></i></button>
             </div>
             <div id="typingIndicator" class="typing-indicator"></div>
           </div>
@@ -356,44 +441,49 @@ function renderLobby() {
       </div>
 
       <aside class="dashboard-sidebar">
+        <!-- USER RANK WIDGET -->
         <div class="user-rank-widget">
           <div class="rank-header">
-            <span class="rank-title"><i class="fas fa-trophy"></i> Ranked ELO</span>
+            <span class="rank-title"><i class="fas fa-trophy"></i> COMPETITIVE MMR</span>
             <span id="myEloValue" class="elo-value">${state.myElo || 1000} ELO</span>
           </div>
           <div id="myRankBadge" class="rank-badge-display">
             ${getRankBadgeHTML(state.myElo || 1000)}
           </div>
-          <div class="rank-chart-wrapper" style="height: 90px; margin-top: 8px;">
+          <div class="rank-chart-wrapper">
+            <div class="rank-chart-label">RATING TRAJECTORY</div>
             <canvas id="mobaRankChart"></canvas>
           </div>
         </div>
 
+        <!-- FRIENDS & RIVALS WIDGET -->
         <div class="friends-widget">
           <div class="sidebar-header">
-            <h3><i class="fas fa-user-friends"></i> Friends</h3>
+            <h3><i class="fas fa-user-friends"></i> FRIENDS & RIVALS</h3>
             <span id="myShortId" class="short-id">ID: ...</span>
           </div>
           <div class="add-friend-bar">
-            <input type="text" id="friendIdInput" placeholder="Friend ID" class="sleek-input small">
-            <button id="btnAddFriend" class="icon-btn"><i class="fas fa-plus"></i></button>
+            <input type="text" id="friendIdInput" placeholder="Enter Friend ID..." class="sleek-input small">
+            <button id="btnAddFriend" class="icon-btn" title="Add Friend"><i class="fas fa-user-plus"></i></button>
           </div>
           <div class="friends-list" id="friendsList"></div>
         </div>
         
+        <!-- DIRECT PEER MESSAGING PANEL -->
         <div class="friend-chat-panel" id="friendChatPanel" style="display:none;">
-            <div class="friend-chat-header">
+          <div class="friend-chat-header">
+            <div class="friend-chat-info">
               <div id="friendChatTitle" class="friend-chat-title">Chat</div>
-              <button id="btnCloseFriendChat" class="icon-btn small"><i class="fas fa-times"></i></button>
+              <div id="friendChatSubtitle" class="friend-chat-subtitle" style="display:none;"></div>
             </div>
-            <div id="friendChatSubtitle" class="friend-chat-subtitle" style="display:none;"></div>
-            <div class="friend-chat-messages" id="friendChatMessages"></div>
-            <div class="chat-input-wrapper">
-              <input type="text" id="friendChatInput" placeholder="Message..." class="sleek-input small">
-              <button id="btnSendFriendChat" class="icon-btn small"><i class="fas fa-paper-plane"></i></button>
-            </div>
+            <button id="btnCloseFriendChat" class="icon-btn small" title="Close"><i class="fas fa-times"></i></button>
+          </div>
+          <div class="friend-chat-messages" id="friendChatMessages"></div>
+          <div class="chat-input-wrapper">
+            <input type="text" id="friendChatInput" placeholder="Direct message..." class="sleek-input small">
+            <button id="btnSendFriendChat" class="icon-btn small" title="Send"><i class="fas fa-paper-plane"></i></button>
+          </div>
         </div>
-
       </aside>
     </div>
   `;
@@ -983,28 +1073,37 @@ function renderPlayerList(players) {
         <div class="sleek-player-card ${isPlayerHost ? "host" : ""} ${isCurrentUser ? "me" : ""}">
           ${
             isHost && uid !== currentUid && state.roomStatus === "waiting"
-              ? `<button class="kick-btn" onclick="kickPlayer('${uid}')"><i class="fas fa-times"></i></button>`
+              ? `<button class="kick-btn" onclick="kickPlayer('${uid}')" title="Kick Player"><i class="fas fa-times"></i></button>`
               : ""
           }
           <div class="sp-avatar-wrap">
-            <img src="${escapeHtml(player.photoURL || "")}" class="sp-avatar" alt="Avatar">
-            ${isPlayerHost ? '<div class="sp-host-badge"><i class="fas fa-crown"></i></div>' : ""}
+            <img src="${escapeHtml(player.photoURL || "")}" class="sp-avatar" alt="Avatar" onerror="this.src='../assets/images/default-avatar.png'">
+            ${isPlayerHost ? '<div class="sp-host-badge" title="Room Host"><i class="fas fa-crown"></i></div>' : ""}
           </div>
           <div class="sp-info">
-            <div class="sp-name">${escapeHtml(player.name || "Guest")} ${isCurrentUser ? "<span>(You)</span>" : ""} ${rankBadge}</div>
-            <div class="sp-stats">${player.wpm || 0} WPM · ${player.accuracy || 100}%</div>
+            <div class="sp-name-row">
+              <span class="sp-name">${escapeHtml(player.name || "Guest")}</span>
+              ${isCurrentUser ? '<span class="sp-you-badge">YOU</span>' : ""}
+            </div>
+            <div class="sp-meta-row">
+              <span class="sp-rank-slot">${rankBadge}</span>
+              <span class="sp-stats">${player.wpm || 0} WPM · ${player.accuracy || 100}%</span>
+            </div>
             <div class="sp-progress-bar"><div class="sp-progress-fill" style="width:${progress}%"></div></div>
           </div>
-          <div class="sp-status ${player.isReady ? "ready" : ""}">
-            ${player.isFinished ? '<i class="fas fa-flag-checkered"></i>' : player.isReady ? '<i class="fas fa-check"></i>' : '<i class="fas fa-hourglass-half"></i>'}
+          <div class="sp-status ${player.isReady ? "ready" : "waiting"}">
+            ${player.isFinished ? '<span class="status-pill finished"><i class="fas fa-flag-checkered"></i> Done</span>' : player.isReady ? '<span class="status-pill ready"><i class="fas fa-check"></i> Ready</span>' : '<span class="status-pill waiting"><i class="fas fa-hourglass-half"></i> Wait</span>'}
           </div>
         </div>
       `;
     } else {
       html += `
         <div class="sleek-player-card empty">
-          <div class="sp-avatar-wrap empty"><i class="fas fa-plus"></i></div>
-          <div class="sp-info"><div class="sp-name empty">Empty Slot</div></div>
+          <div class="sp-avatar-wrap empty"><i class="fas fa-user-plus"></i></div>
+          <div class="sp-info">
+            <div class="sp-name empty">Open Slot</div>
+            <div class="sp-slot-sub">Waiting for challenger...</div>
+          </div>
         </div>
       `;
     }
@@ -1020,7 +1119,7 @@ function renderRaceTrack(players) {
   const currentUid = auth.currentUser?.uid;
 
   if (!sorted.length) {
-    els.raceTrack.innerHTML = `<div class="empty-race-state">No racers in room yet.</div>`;
+    els.raceTrack.innerHTML = `<div class="empty-race-state"><i class="fas fa-spinner fa-spin"></i> Initializing race track...</div>`;
     return;
   }
 
@@ -1030,13 +1129,23 @@ function renderRaceTrack(players) {
       const isMe = player.uid === currentUid;
       return `
         <div class="race-lane ${isMe ? "me" : ""}">
-          <div class="lane-player">${escapeHtml(player.name || "Guest")}</div>
+          <div class="lane-player-block">
+            <span class="lane-pos">#${index + 1}</span>
+            <div class="lane-player">${escapeHtml(player.name || "Guest")}</div>
+            ${isMe ? '<span class="lane-you-tag">YOU</span>' : ""}
+          </div>
           <div class="lane-track">
             <div class="lane-progress" style="width:${progress}%"></div>
             <div class="lane-car" style="left:${progress}%">
-              <img src="${escapeHtml(player.photoURL || "")}" class="lane-avatar">
-              <div class="lane-wpm">${player.wpm || 0}</div>
+              <div class="lane-avatar-wrap">
+                <img src="${escapeHtml(player.photoURL || "")}" class="lane-avatar" onerror="this.src='../assets/images/default-avatar.png'">
+              </div>
+              <div class="lane-wpm-badge">
+                <span class="lane-wpm">${player.wpm || 0}</span>
+                <span class="lane-unit">WPM</span>
+              </div>
             </div>
+            <div class="lane-finish-line"><i class="fas fa-flag-checkered"></i></div>
           </div>
         </div>
       `;
