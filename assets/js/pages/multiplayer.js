@@ -839,7 +839,6 @@ async function joinRoom(roomId) {
     state.resultsShown = false;
     state.scoreSaved = false;
 
-    const playerRef = ref(rtdb, `rooms/${roomId}/players/${user.uid}`);
     onDisconnect(playerRef).remove();
     onDisconnect(ref(rtdb, `rooms/${roomId}/typing/${user.uid}`)).remove();
 
