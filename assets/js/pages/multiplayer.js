@@ -27,6 +27,7 @@ import {
   addDoc,
   orderBy,
   serverTimestamp,
+  runTransaction as runFirestoreTransaction,
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 import { translations } from "../data/translations.js";
 import { renderNavbar } from "../components/navbar.js";
@@ -692,17 +693,23 @@ async function joinRoom(roomId) {
       return;
     }
 
-    // Atomic join via runTransaction to avoid race conditions
-    const playersRef = ref(rtdb, `rooms/${roomId}/players`);
-    let joinRejectedReason = null;
+    const currentPlayers = roomData.players || {};
+    const playerCount = Object.keys(currentPlayers).length;
 
+    if (playerCount >= maxPlayers && !currentPlayers[user.uid]) {
+      alert(t.msgRoomFull || "Room is full!");
+      updateLobbyStatusLabel("Room full");
+      return;
+    }
+
+    const playerRef = ref(rtdb, `rooms/${roomId}/players/${user.uid}`);
     const initialPlayerData = {
       name: user.displayName || "Guest",
       photoURL:
         user.photoURL ||
         `https://ui-avatars.com/api/?name=${encodeURIComponent(user.displayName || "Guest")}&background=random`,
-      progress: 0,
-      isReady: false,
+      progress: currentPlayers[user.uid]?.progress || 0,
+      isReady: Boolean(currentPlayers[user.uid]?.isReady),
       wpm: 0,
       accuracy: 100,
       isFinished: false,
@@ -710,39 +717,12 @@ async function joinRoom(roomId) {
       elo: state.myElo || 1000,
     };
 
-    const txResult = await runTransaction(playersRef, (currentPlayers) => {
-      if (!currentPlayers) {
-        currentPlayers = {};
-      }
-
-      if (currentPlayers[user.uid]) {
-        currentPlayers[user.uid] = {
-          ...currentPlayers[user.uid],
-          name: initialPlayerData.name,
-          photoURL: initialPlayerData.photoURL,
-          elo: initialPlayerData.elo,
-        };
-        return currentPlayers;
-      }
-
-      const currentCount = Object.keys(currentPlayers).length;
-      if (currentCount >= maxPlayers) {
-        joinRejectedReason = "full";
-        return; // Abort transaction
-      }
-
-      currentPlayers[user.uid] = initialPlayerData;
-      return currentPlayers;
-    });
-
-    if (!txResult.committed) {
-      if (joinRejectedReason === "full") {
-        alert(t.msgRoomFull || "Room is full!");
-        updateLobbyStatusLabel("Room full");
-      } else {
-        alert(t.msgRoomNotFound || "Could not join room.");
-        updateLobbyStatusLabel("Join failed");
-      }
+    try {
+      await set(playerRef, initialPlayerData);
+    } catch (writeErr) {
+      console.warn("Join failed or room became full:", writeErr);
+      alert(t.msgRoomFull || "Could not join room (room may be full)!");
+      updateLobbyStatusLabel("Join failed");
       return;
     }
 
@@ -757,10 +737,9 @@ async function joinRoom(roomId) {
 
     resetRoomSubscriptions();
 
-    const committedPlayers = txResult.snapshot.val() || {};
     state.mpRoomId = roomId;
     state.mpPlayerId = user.uid;
-    state.isUserReady = Boolean(committedPlayers[user.uid]?.isReady);
+    state.isUserReady = Boolean(initialPlayerData.isReady);
     state.hostId = roomData.host || user.uid;
     state.roomMode = roomData.mode || "normal";
     state.matchDuration = parseInt(roomData.duration || DEFAULT_DURATION, 10);
@@ -1163,14 +1142,6 @@ async function startMultiplayerGame() {
     [`rooms/${state.mpRoomId}/finishedAt`]: null,
   };
 
-  Object.keys(state.mpPlayersData).forEach((uid) => {
-    updates[`rooms/${state.mpRoomId}/players/${uid}/progress`] = 0;
-    updates[`rooms/${state.mpRoomId}/players/${uid}/wpm`] = 0;
-    updates[`rooms/${state.mpRoomId}/players/${uid}/accuracy`] = 100;
-    updates[`rooms/${state.mpRoomId}/players/${uid}/isFinished`] = false;
-    updates[`rooms/${state.mpRoomId}/players/${uid}/finishedAt`] = null;
-  });
-
   await update(ref(rtdb), updates);
 }
 
@@ -1300,6 +1271,21 @@ function startGame(text, duration = DEFAULT_DURATION) {
   }
 
   state.isGameActive = true;
+  state.charIndex = 0;
+  state.mistakes = 0;
+  state.isPlayerFinished = false;
+  state.latestStats = { wpm: 0, accuracy: 100, progress: 0 };
+
+  syncLocalPlayerState(
+    {
+      progress: 0,
+      wpm: 0,
+      accuracy: 100,
+      isFinished: false,
+      finishedAt: null,
+    },
+    true,
+  );
 
   if (els.gameStatusBadge) els.gameStatusBadge.innerText = "Racing";
 
@@ -1590,22 +1576,32 @@ function finalizeRoomResults() {
   if (els.resultOverlay) els.resultOverlay.classList.add("active");
 }
 
-function calculateEloChanges(sortedPlayers, currentUid) {
+function calculateEloChanges(
+  sortedPlayers,
+  currentUid,
+  myVerifiedElo,
+  opponentEloMap = {},
+) {
   const N = sortedPlayers.length;
   if (N < 2) return 0;
 
   const myIndex = sortedPlayers.findIndex((p) => p.uid === currentUid);
   if (myIndex === -1) return 0;
 
-  const myPlayer = sortedPlayers[myIndex];
-  const Ra = myPlayer.elo || 1000;
+  const Ra =
+    myVerifiedElo != null
+      ? myVerifiedElo
+      : sortedPlayers[myIndex].elo || 1000;
   const K = 32;
 
   let totalScoreDiff = 0;
 
   sortedPlayers.forEach((opp, oppIndex) => {
     if (opp.uid === currentUid) return;
-    const Rb = opp.elo || 1000;
+    const Rb =
+      opponentEloMap[opp.uid] != null
+        ? opponentEloMap[opp.uid]
+        : opp.elo || 1000;
     const Ea = 1 / (1 + Math.pow(10, (Rb - Ra) / 400));
     let Sa = 0.5;
     if (myIndex < oppIndex) Sa = 1;
@@ -1649,25 +1645,77 @@ function updateRankUI() {
 async function applyRankedMatchResults(user, sorted) {
   const myIndex = sorted.findIndex((p) => p.uid === user.uid);
   const myRank = myIndex !== -1 ? myIndex + 1 : sorted.length;
-  const deltaElo = calculateEloChanges(sorted, user.uid);
-  const oldElo = state.myElo || 1000;
-  const newElo = Math.max(100, oldElo + deltaElo);
-
-  state.myElo = newElo;
-  if (!state.myEloHistory) state.myEloHistory = [oldElo];
-  state.myEloHistory.push(newElo);
-
-  renderEloResultBadge(deltaElo, newElo, myRank);
-  updateRankUI();
-  renderMobaRankChart(state.myEloHistory);
 
   try {
     const userRef = doc(db, "users", user.uid);
-    await updateDoc(userRef, {
-      elo: newElo,
-      eloHistory: arrayUnion(newElo),
+
+    // Fetch verified opponent ELOs from Firestore to prevent RTDB spoofing
+    const opponentUids = sorted
+      .filter((p) => p.uid !== user.uid)
+      .map((p) => p.uid);
+    const opponentEloMap = {};
+
+    await Promise.all(
+      opponentUids.map(async (uid) => {
+        try {
+          const oppSnap = await getDoc(doc(db, "users", uid));
+          if (oppSnap.exists() && oppSnap.data().elo != null) {
+            opponentEloMap[uid] = oppSnap.data().elo;
+          }
+        } catch (_) {}
+      }),
+    );
+
+    let calculatedDelta = 0;
+    let finalNewElo = 1000;
+    let oldElo = 1000;
+
+    // Atomic Firestore transaction to prevent race conditions across tabs/devices
+    await runFirestoreTransaction(db, async (transaction) => {
+      const userSnap = await transaction.get(userRef);
+      oldElo =
+        userSnap.exists() && userSnap.data().elo != null
+          ? userSnap.data().elo
+          : 1000;
+
+      calculatedDelta = calculateEloChanges(
+        sorted,
+        user.uid,
+        oldElo,
+        opponentEloMap,
+      );
+      finalNewElo = Math.max(100, oldElo + calculatedDelta);
+
+      const existingHistory =
+        userSnap.exists() && Array.isArray(userSnap.data().eloHistory)
+          ? [...userSnap.data().eloHistory]
+          : [oldElo];
+
+      // Direct push preserves duplicate values without arrayUnion deduplication bug
+      existingHistory.push(finalNewElo);
+      const trimmedHistory = existingHistory.slice(-50);
+
+      const currentMatches =
+        userSnap.exists() && typeof userSnap.data().matches_played === "number"
+          ? userSnap.data().matches_played
+          : 0;
+
+      transaction.update(userRef, {
+        elo: finalNewElo,
+        eloHistory: trimmedHistory,
+        matches_played: currentMatches + 1,
+      });
     });
 
+    state.myElo = finalNewElo;
+    if (!state.myEloHistory) state.myEloHistory = [oldElo];
+    state.myEloHistory.push(finalNewElo);
+
+    renderEloResultBadge(calculatedDelta, finalNewElo, myRank);
+    updateRankUI();
+    renderMobaRankChart(state.myEloHistory);
+
+    // Persist complete match history record
     await addDoc(collection(db, "matches_history"), {
       uid: user.uid,
       roomId: state.mpRoomId,
@@ -1678,15 +1726,15 @@ async function applyRankedMatchResults(user, sorted) {
       wpm: state.latestStats.wpm || 0,
       accuracy: state.latestStats.accuracy || 100,
       eloBefore: oldElo,
-      eloAfter: newElo,
-      eloDelta: deltaElo,
+      eloAfter: finalNewElo,
+      eloDelta: calculatedDelta,
       opponents: sorted
         .filter((p) => p.uid !== user.uid)
         .map((p) => ({
           uid: p.uid,
           name: p.name || "Guest",
           wpm: p.wpm || 0,
-          elo: p.elo || 1000,
+          elo: opponentEloMap[p.uid] || p.elo || 1000,
         })),
       createdAt: serverTimestamp(),
     });
@@ -1695,10 +1743,8 @@ async function applyRankedMatchResults(user, sorted) {
   }
 }
 
-function renderFinalLeaderboard() {
+function renderFinalLeaderboard(sorted = getSortedPlayers()) {
   if (!els.finalLeaderboard) return;
-
-  const sorted = getSortedPlayers();
 
   if (!sorted.length) {
     els.finalLeaderboard.innerHTML = `<div class="empty-race-state">No result data.</div>`;

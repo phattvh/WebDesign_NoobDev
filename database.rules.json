@@ -31,11 +31,13 @@
         },
         "players": {
           ".read": "auth != null",
-          ".write": "auth != null && (!data.exists() || data.parent().child('host').val() === auth.uid || (newData.child(auth.uid).exists() && data.parent().child('status').val() === 'waiting'))",
           ".validate": "!data.parent().child('maxPlayers').exists() || newData.numChildren() <= data.parent().child('maxPlayers').val()",
           "$uid": {
-            ".write": "auth != null && (auth.uid === $uid || data.parent().parent().child('host').val() === auth.uid)",
+            ".write": "auth != null && (auth.uid === $uid || (!newData.exists() && data.parent().parent().child('host').val() === auth.uid && data.parent().parent().child('status').val() === 'waiting'))",
             ".validate": "newData.hasChildren(['name', 'progress', 'wpm', 'accuracy', 'isFinished'])",
+            "name": {
+              ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 50"
+            },
             "wpm": {
               ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 350"
             },
@@ -47,6 +49,9 @@
             },
             "isFinished": {
               ".validate": "newData.isBoolean()"
+            },
+            "elo": {
+              ".validate": "newData.isNumber() && newData.val() >= 100 && newData.val() <= 4000"
             }
           }
         },
