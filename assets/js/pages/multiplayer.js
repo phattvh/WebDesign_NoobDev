@@ -11,6 +11,7 @@ import {
   remove,
   onDisconnect,
   onChildAdded,
+  runTransaction,
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 import {
   doc,
@@ -163,6 +164,24 @@ document.addEventListener("DOMContentLoaded", () => {
   if (els.btnCopyRoomCodeResult) {
     els.btnCopyRoomCodeResult.onclick = copyInviteLink;
   }
+
+  const leaveBtn = document.querySelector('button[title="Leave Match"]');
+  if (leaveBtn) {
+    leaveBtn.onclick = async (e) => {
+      e.preventDefault();
+      await leaveCurrentRoom();
+      location.reload();
+    };
+  }
+
+  window.addEventListener("beforeunload", () => {
+    if (state.mpRoomId && state.mpPlayerId) {
+      try {
+        remove(ref(rtdb, `rooms/${state.mpRoomId}/players/${state.mpPlayerId}`));
+        remove(ref(rtdb, `rooms/${state.mpRoomId}/typing/${state.mpPlayerId}`));
+      } catch (_) {}
+    }
+  });
 
   setupControls();
   checkInviteLink();
@@ -442,6 +461,67 @@ function resetRoomSubscriptions() {
   clearTimeout(state.roomFinishTimeout);
   state.roomCountdownTarget = null;
 }
+
+let isMigratingHost = false;
+async function migrateHost(roomId, remainingUids) {
+  if (isMigratingHost || !roomId || !remainingUids || remainingUids.length === 0) return;
+  isMigratingHost = true;
+  try {
+    const hostRef = ref(rtdb, `rooms/${roomId}/host`);
+    await runTransaction(hostRef, (currentHost) => {
+      // If currentHost was already migrated to an active player, keep it
+      if (currentHost && remainingUids.includes(currentHost)) {
+        return currentHost;
+      }
+      // Deterministically elect the first UID in sorted order
+      const sorted = [...remainingUids].sort();
+      return sorted[0] || null;
+    });
+  } catch (error) {
+    console.warn("Host migration transaction error:", error);
+  } finally {
+    isMigratingHost = false;
+  }
+}
+
+async function leaveCurrentRoom() {
+  const roomId = state.mpRoomId;
+  const playerId = state.mpPlayerId || auth.currentUser?.uid;
+
+  if (roomId && playerId) {
+    try {
+      try {
+        await onDisconnect(ref(rtdb, `rooms/${roomId}/players/${playerId}`)).cancel();
+        await onDisconnect(ref(rtdb, `rooms/${roomId}/typing/${playerId}`)).cancel();
+      } catch (_) {}
+
+      await remove(ref(rtdb, `rooms/${roomId}/players/${playerId}`));
+      await remove(ref(rtdb, `rooms/${roomId}/typing/${playerId}`));
+    } catch (err) {
+      console.warn("Error leaving room:", err);
+    }
+  }
+
+  resetRoomSubscriptions();
+
+  state.mpRoomId = null;
+  state.mpPlayerId = null;
+  state.hostId = null;
+  state.isUserReady = false;
+  state.roomStatus = "waiting";
+  state.mpPlayersData = {};
+  state.isGameActive = false;
+  state.isPlayerFinished = false;
+
+  const mpRoomInfo = document.getElementById("mpRoomInfo");
+  if (mpRoomInfo) {
+    mpRoomInfo.classList.remove("active");
+    mpRoomInfo.style.display = "none";
+  }
+  updateReadyButtonUI();
+  updateRoomActionVisibility();
+}
+
 function copyInviteLink() {
   if (!state.mpRoomId) return;
 
@@ -502,6 +582,9 @@ async function findMatch(mode, duration, maxPlayers = 2) {
 
     if (foundRoomId) {
       await joinRoom(foundRoomId);
+      if (state.mpRoomId !== foundRoomId) {
+        await createRoom(mode, duration, maxPlayers);
+      }
     } else {
       await createRoom(mode, duration, maxPlayers);
     }
@@ -524,6 +607,10 @@ async function createRoom(
 ) {
   const user = auth.currentUser;
   if (!user) return;
+
+  if (state.mpRoomId) {
+    await leaveCurrentRoom();
+  }
 
   const roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
   const text = getRandomText("timetest", null, state.lang);
@@ -557,6 +644,10 @@ async function joinRoom(roomId) {
     return;
   }
 
+  if (state.mpRoomId && state.mpRoomId !== roomId) {
+    await leaveCurrentRoom();
+  }
+
   const t = translations[state.lang] || translations.en;
   updateLobbyStatusLabel("Joining room...");
 
@@ -571,30 +662,78 @@ async function joinRoom(roomId) {
     }
 
     const roomData = roomSnapshot.val() || {};
-    const players = roomData.players || {};
-    const playerCount = Object.keys(players).length;
-    state.roomMaxPlayers = parseInt(
+    const maxPlayers = parseInt(
       roomData.maxPlayers || DEFAULT_MAX_PLAYERS,
       10,
     );
+    state.roomMaxPlayers = maxPlayers;
 
-    if (roomData.status !== "waiting" && !players[user.uid]) {
+    if (roomData.status !== "waiting" && !roomData.players?.[user.uid]) {
       alert(t.msgRoomStarted || "This match has already started.");
       updateLobbyStatusLabel("Room already started");
       return;
     }
 
-    if (playerCount >= state.roomMaxPlayers && !players[user.uid]) {
-      alert(t.msgRoomFull || "Room is full!");
-      updateLobbyStatusLabel("Room full");
+    // Atomic join via runTransaction to avoid race conditions
+    const playersRef = ref(rtdb, `rooms/${roomId}/players`);
+    let joinRejectedReason = null;
+
+    const initialPlayerData = {
+      name: user.displayName || "Guest",
+      photoURL:
+        user.photoURL ||
+        `https://ui-avatars.com/api/?name=${encodeURIComponent(user.displayName || "Guest")}&background=random`,
+      progress: 0,
+      isReady: false,
+      wpm: 0,
+      accuracy: 100,
+      isFinished: false,
+      finishedAt: null,
+      elo: state.myElo || 1000,
+    };
+
+    const txResult = await runTransaction(playersRef, (currentPlayers) => {
+      if (!currentPlayers) {
+        currentPlayers = {};
+      }
+
+      if (currentPlayers[user.uid]) {
+        currentPlayers[user.uid] = {
+          ...currentPlayers[user.uid],
+          name: initialPlayerData.name,
+          photoURL: initialPlayerData.photoURL,
+          elo: initialPlayerData.elo,
+        };
+        return currentPlayers;
+      }
+
+      const currentCount = Object.keys(currentPlayers).length;
+      if (currentCount >= maxPlayers) {
+        joinRejectedReason = "full";
+        return; // Abort transaction
+      }
+
+      currentPlayers[user.uid] = initialPlayerData;
+      return currentPlayers;
+    });
+
+    if (!txResult.committed) {
+      if (joinRejectedReason === "full") {
+        alert(t.msgRoomFull || "Room is full!");
+        updateLobbyStatusLabel("Room full");
+      } else {
+        alert(t.msgRoomNotFound || "Could not join room.");
+        updateLobbyStatusLabel("Join failed");
+      }
       return;
     }
 
     resetRoomSubscriptions();
 
+    const committedPlayers = txResult.snapshot.val() || {};
     state.mpRoomId = roomId;
     state.mpPlayerId = user.uid;
-    state.isUserReady = Boolean(players[user.uid]?.isReady);
+    state.isUserReady = Boolean(committedPlayers[user.uid]?.isReady);
     state.hostId = roomData.host || user.uid;
     state.roomMode = roomData.mode || "normal";
     state.matchDuration = parseInt(roomData.duration || DEFAULT_DURATION, 10);
@@ -605,20 +744,6 @@ async function joinRoom(roomId) {
     state.scoreSaved = false;
 
     const playerRef = ref(rtdb, `rooms/${roomId}/players/${user.uid}`);
-    await set(playerRef, {
-      name: user.displayName || "Guest",
-      photoURL:
-        user.photoURL ||
-        `https://ui-avatars.com/api/?name=${encodeURIComponent(user.displayName || "Guest")}&background=random`,
-      progress: players[user.uid]?.progress || 0,
-      isReady: players[user.uid]?.isReady || false,
-      wpm: players[user.uid]?.wpm || 0,
-      accuracy: players[user.uid]?.accuracy || 100,
-      isFinished: false,
-      finishedAt: null,
-      elo: state.myElo || 1000,
-    });
-
     onDisconnect(playerRef).remove();
     onDisconnect(ref(rtdb, `rooms/${roomId}/typing/${user.uid}`)).remove();
 
@@ -708,6 +833,15 @@ function setupRoomListeners(roomId) {
       }
 
       state.mpPlayersData = players;
+
+      // Automatically migrate host if current host disconnected/left
+      if (state.hostId && !players[state.hostId]) {
+        const remainingUids = Object.keys(players);
+        if (remainingUids.length > 0) {
+          migrateHost(roomId, remainingUids);
+        }
+      }
+
       state.isUserReady = Boolean(players[state.mpPlayerId]?.isReady);
       renderPlayerList(players);
       renderRaceTrack(players);
@@ -968,8 +1102,15 @@ function updateReadyButtonUI() {
 }
 
 async function startMultiplayerGame() {
-  const players = Object.values(state.mpPlayersData || {});
+  const currentUid = auth.currentUser?.uid;
   const t = translations[state.lang] || translations.en;
+
+  if (!state.mpRoomId || !currentUid || state.hostId !== currentUid) {
+    alert(t.msgOnlyHostCanStart || "Only the host can start the match!");
+    return;
+  }
+
+  const players = Object.values(state.mpPlayersData || {});
 
   if (players.length < 2) {
     alert(
@@ -1143,20 +1284,25 @@ function startGame(text, duration = DEFAULT_DURATION) {
   if (els.overlay) els.overlay.classList.add("hidden");
 
   clearInterval(state.timer);
-  state.timer = setInterval(
-    () => {
-      state.timeLeft -= 1;
-      if (els.time) els.time.innerText = formatTime(state.timeLeft);
-      updateStats();
-      updateWPMChart(); // Update WPM chart with current player data
-      renderMiniRoomSnapshot();
+  const matchDuration = duration || state.matchDuration || DEFAULT_DURATION;
+  state.maxTime = matchDuration;
+  state.timeLeft = matchDuration;
+  const startedAt = Date.now();
 
-      if (state.timeLeft <= 0) {
-        finishPlayerRun("time");
-      }
-    },
-    isMobileDevice() ? 2000 : 1000,
-  );
+  state.timer = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+    state.timeLeft = Math.max(0, matchDuration - elapsed);
+
+    if (els.time) els.time.innerText = formatTime(state.timeLeft);
+    updateStats();
+    updateWPMChart();
+    renderMiniRoomSnapshot();
+
+    if (state.timeLeft <= 0) {
+      clearInterval(state.timer);
+      finishPlayerRun("time");
+    }
+  }, 250);
   // If the current user is the host, schedule server-side room finish
   if (auth.currentUser?.uid === state.hostId) {
     clearTimeout(state.roomFinishTimeout);
@@ -1291,13 +1437,39 @@ function updateStats() {
   if (els.acc) els.acc.innerText = `${accuracy}%`;
 }
 
-function syncLocalPlayerState(partial) {
+let syncThrottleTimer = null;
+let pendingSyncPayload = null;
+
+function syncLocalPlayerState(partial, immediate = false) {
   if (!state.mpRoomId || !state.mpPlayerId) return;
 
-  update(
-    ref(rtdb, `rooms/${state.mpRoomId}/players/${state.mpPlayerId}`),
-    partial,
-  );
+  pendingSyncPayload = { ...(pendingSyncPayload || {}), ...partial };
+
+  const flush = () => {
+    if (syncThrottleTimer) {
+      clearTimeout(syncThrottleTimer);
+      syncThrottleTimer = null;
+    }
+    if (pendingSyncPayload && state.mpRoomId && state.mpPlayerId) {
+      const payload = { ...pendingSyncPayload };
+      pendingSyncPayload = null;
+      update(
+        ref(rtdb, `rooms/${state.mpRoomId}/players/${state.mpPlayerId}`),
+        payload,
+      ).catch((err) => console.warn("Failed to sync player state:", err));
+    }
+  };
+
+  if (immediate || partial.isFinished) {
+    flush();
+    return;
+  }
+
+  if (!syncThrottleTimer) {
+    syncThrottleTimer = setTimeout(() => {
+      flush();
+    }, 200);
+  }
 }
 
 function finishPlayerRun(reason = "completed") {
@@ -1318,13 +1490,16 @@ function finishPlayerRun(reason = "completed") {
       reason === "completed" ? "Finished" : "Time Up";
   }
 
-  syncLocalPlayerState({
-    progress: reason === "completed" ? 100 : state.latestStats.progress,
-    wpm: state.latestStats.wpm,
-    accuracy: state.latestStats.accuracy,
-    isFinished: true,
-    finishedAt: Date.now(),
-  });
+  syncLocalPlayerState(
+    {
+      progress: reason === "completed" ? 100 : state.latestStats.progress,
+      wpm: state.latestStats.wpm,
+      accuracy: state.latestStats.accuracy,
+      isFinished: true,
+      finishedAt: Date.now(),
+    },
+    true,
+  );
 
   showToast(
     reason === "completed"
